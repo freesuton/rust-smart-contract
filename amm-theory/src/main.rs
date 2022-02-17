@@ -183,30 +183,34 @@ impl State {
     fn get_amm(&self, t0: &Token, t1: &Token) -> Option<&AMM> {
         //UNIMPLEMENTED
         for amm in &self.amms {
-            if amm.t0 == *t0 && amm.t1 == *t1 {
-                return Some(amm);
+            if amm.t0 == *t0 && amm.t1 == *t1 || amm.t0 == *t1 && amm.t1 == *t0{
+                return Some(amm)
             }
         }
         return None
     }
 
     fn get_reserves(&self, t: &Token, tother: &Token) -> u64 {
-        // let amm = &self.get_amm(t, tother);
-        let amm = match self.get_amm(t,tother) {
-            Some(amm) => amm,
+
+        let reserve = match self.get_amm(t,tother) {
+            Some(amm) => {
+                if amm.t0 == *t{
+                return amm.r0
+                }else{
+                    return amm.r1
+                }
+            },
+
             None => return 0
         };
-        let reserves:u64 = amm.r0;
-        // return 0
-        print!{"{}",reserves};
-        return reserves
+        return reserve
     }
 
     fn set_reserve(&mut self, t0: &Token, r0: u64, t1: &Token, r1: u64) {
         //UNIMPLEMENTED
         let mut i = 0;
         for amm in &self.amms {
-            if amm.t0 == *t0 && amm.t1 == *t1 {
+            if amm.t0 == *t0 && amm.t1 == *t1 || amm.t0 == *t1 && amm.t1 == *t0{
                 break
             }
             i = i + 1;
@@ -335,11 +339,11 @@ impl Transition for Deposit {
 
         post.set_balance(&self.sender,&self.t0, t0_balance - &self.v0);
         post.set_balance(&self.sender,&self.t1, t1_balance - &self.v1);
-        post.set_reserve(&self.t0,t0_reserve,&self.t1,t1_reserve);
+        post.set_reserve(&self.t0,t0_reserve+&self.v0,&self.t1,t1_reserve+&self.v1);
 
         //add LP Token
-        let LP_Token = Token::mint(&self.t0, &self.t1);
-        post.set_balance(&self.sender,&LP_Token,&self.v0+&self.v1);
+        let lp_token = Token::mint(&self.t0, &self.t1);
+        post.set_balance(&self.sender,&lp_token,&self.v0+&self.v1);
         
         Result::Ok(post)
         // Result::Err(TransitionError::Unimplemented)
@@ -369,19 +373,21 @@ impl Transition for Redeem {
     fn apply(&self, pre: &State) -> Result<State, TransitionError> {
         //UNIMPLEMENTED
         let mut post = pre.clone();
-        let LP_Token = Token::mint(&self.t0, &self.t1);
-        let LP_supply = post.token_supply(&LP_Token);
-        let ratio_redeem = self.v/LP_supply;
+        let lp_token = Token::mint(&self.t0, &self.t1);
+        let lp_supply = post.token_supply(&lp_token);
+        // print!{"lp_supply = {}", lp_supply};
+        let ratio_redeem = self.v/lp_supply;
+        // print!{"lp_supply = {}", ratio_redeem};
         let t0_reserve = post.get_reserves(&self.t0,&self.t1);
         let t1_reserve = post.get_reserves(&self.t1,&self.t0);
         let t0_balance = post.get_balance(&self.sender,&self.t0);
         let t1_balance = post.get_balance(&self.sender,&self.t1);
-        let LP_balance = post.get_balance(&self.sender,&LP_Token);
+        let lp_balance = post.get_balance(&self.sender,&lp_token);
 
-        post.set_reserve(&self.t0,t0_reserve - t0_reserve*ratio_redeem,&self.t1,t1_reserve- t1_reserve*ratio_redeem);
-        post.set_balance(&self.sender,&self.t0, t0_balance + t0_reserve*ratio_redeem);
-        post.set_balance(&self.sender,&self.t1, t1_balance + t1_reserve*ratio_redeem);
-        post.set_balance(&self.sender,&LP_Token, LP_balance - self.v);
+        post.set_reserve(&self.t0,t0_reserve - t0_reserve*self.v/lp_supply,&self.t1,t1_reserve- t1_reserve*self.v/lp_supply);
+        post.set_balance(&self.sender,&self.t0, t0_balance + t0_reserve*self.v/lp_supply);
+        post.set_balance(&self.sender,&self.t1, t1_balance + t1_reserve*self.v/lp_supply);
+        post.set_balance(&self.sender,&lp_token, lp_balance - self.v);
 
         Result::Ok(post)
         // Result::Err(TransitionError::Unimplemented)
@@ -397,6 +403,7 @@ struct Swap {
 }
 
 impl Swap {
+    // tin means token to be in the AMM
     fn new(sender: &User, tin: &Token, tout: &Token, x: u64) -> Self {
         Swap {
             sender: sender.clone(),
@@ -411,17 +418,29 @@ impl Transition for Swap {
     fn apply(&self, pre: &State) -> Result<State, TransitionError> {
         //UNIMPLEMENTED
         let mut post = pre.clone();
-        let out_balance = post.get_balance(&self.sender,&self.tout);
+        let pre_in_balance = post.get_balance(&self.sender,&self.tin);
+        let pre_out_balance = post.get_balance(&self.sender, &self.tout);
+        // print!{"pre_out_balance:{},{} ",pre_in_balance,self.x};
+        // print!{"amm lenth: {}", post.amms.len()}
+        //get reserves before swap
         let pre_out_reserve = post.get_reserves(&self.tout,&self.tin);
         let pre_in_reserve = post.get_reserves(&self.tin,&self.tout);
-        print!{"in: {} out:{}",pre_out_reserve,pre_in_reserve};
+        // let pre_in_reserve = post.get_amm(&self.tin,&self.tout).get_reserves(&self.tout);
+        // print!{"pre_out_reserve:{}",pre_out_reserve};
+        //calculate constant K
+        //  print!{"in and out reserve:{},{} ",pre_out_reserve,pre_in_reserve};
         let constant_num = pre_out_reserve * pre_in_reserve;
-        let post_out_reserve = pre_out_reserve + self.x;
-        let post_in_reserve = post_out_reserve / constant_num;
-        //set out balance
-        post.set_balance(&self.sender,&self.tout,out_balance - self.x);
-        //set out reserve
-        post.set_reserve(&self.tout,post_out_reserve, &self.tin,post_in_reserve);
+        //calculate reserves after swap
+        let post_in_reserve = pre_in_reserve + self.x ;
+        let post_out_reserve = constant_num/post_in_reserve ;
+
+        //set in token balance
+        // print!{"pre_in_balance:{},{} ",pre_in_balance,self.x};
+        post.set_balance(&self.sender,&self.tin,pre_in_balance - self.x);
+        //set out token balance
+        post.set_balance(&self.sender,&self.tout,pre_out_balance + pre_out_reserve-post_out_reserve);
+        //set post in and out reserve
+        post.set_reserve(&self.tin,post_in_reserve,&self.tout,post_out_reserve);
 
         Result::Ok(post)
         // Result::Err(TransitionError::Unimplemented)
