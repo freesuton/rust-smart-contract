@@ -375,9 +375,7 @@ impl Transition for Redeem {
         let mut post = pre.clone();
         let lp_token = Token::mint(&self.t0, &self.t1);
         let lp_supply = post.token_supply(&lp_token);
-        // print!{"lp_supply = {}", lp_supply};
         let ratio_redeem = self.v/lp_supply;
-        // print!{"lp_supply = {}", ratio_redeem};
         let t0_reserve = post.get_reserves(&self.t0,&self.t1);
         let t1_reserve = post.get_reserves(&self.t1,&self.t0);
         let t0_balance = post.get_balance(&self.sender,&self.t0);
@@ -420,22 +418,15 @@ impl Transition for Swap {
         let mut post = pre.clone();
         let pre_in_balance = post.get_balance(&self.sender,&self.tin);
         let pre_out_balance = post.get_balance(&self.sender, &self.tout);
-        // print!{"pre_out_balance:{},{} ",pre_in_balance,self.x};
-        // print!{"amm lenth: {}", post.amms.len()}
         //get reserves before swap
         let pre_out_reserve = post.get_reserves(&self.tout,&self.tin);
         let pre_in_reserve = post.get_reserves(&self.tin,&self.tout);
-        // let pre_in_reserve = post.get_amm(&self.tin,&self.tout).get_reserves(&self.tout);
-        // print!{"pre_out_reserve:{}",pre_out_reserve};
         //calculate constant K
-        //  print!{"in and out reserve:{},{} ",pre_out_reserve,pre_in_reserve};
         let constant_num = pre_out_reserve * pre_in_reserve;
         //calculate reserves after swap
         let post_in_reserve = pre_in_reserve + self.x ;
         let post_out_reserve = constant_num/post_in_reserve ;
-
         //set in token balance
-        // print!{"pre_in_balance:{},{} ",pre_in_balance,self.x};
         post.set_balance(&self.sender,&self.tin,pre_in_balance - self.x);
         //set out token balance
         post.set_balance(&self.sender,&self.tout,pre_out_balance + pre_out_reserve-post_out_reserve);
