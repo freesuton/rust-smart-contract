@@ -225,9 +225,12 @@ impl State {
                 t1: t1.clone()
             };
             self.amms.push(new_amm);
-        }else{
+        }else if self.amms[i].t0 == *t0 {
             self.amms[i].r0 = r0;
             self.amms[i].r1 = r1;
+        }else{
+            self.amms[i].r0 = r1;
+            self.amms[i].r1 = r0;
         }
         
 
@@ -490,7 +493,17 @@ fn price_oracle(s: &State, t: &Token) -> f64 {
             // let amm = Some(s.get_amm(&token0, &token1)) ;
             let r0 = s.get_reserves(&token0,&token1);
             let r1 = s.get_reserves(&token1,&token0);
-            (1000.0*r0 + 1000.0*r1)/200.0
+
+            let mut sum = 0.0;
+            for wallet in &s.wallets {
+                for balance in &wallet.balances {
+                    if balance.token == *t {
+                        sum += balance.value;
+                    }
+                }
+            }
+
+            (1000.0*r0 + 1000.0*r1)/sum
         }
     }
 }
@@ -505,9 +518,11 @@ fn SFr1(r0:f64,r1:f64,sfr0: f64) -> f64 {
     r0*r1/sfr0
 }
 
-// fn test_oracle() -> f64 {
-//     99999.9
-// }
+fn price_mini_transaction(p0:f64,p1:f64,r0:f64,r1:f64) -> f64 {
+    let p = p1/p0 * r0 * r1;
+    let w0 = p.sqrt() - r0;
+    w0
+}
 
 
 
@@ -530,45 +545,120 @@ fn mev0(){
 
     let mut v: Vec<Box<dyn Transition>> = Vec::new();
     v.push(Box::new(Deposit::new(&o,100.0,&t0,100.0,&t1)));
-    //for test
-   
-
-    let sfr0 = SFr0(20.0, 15.0, 100.0,100.0);
     
+    //inner layer
+    let sfr0 = SFr0(20.0, 15.0, 100.0,100.0);
     let v0 = sfr0 - 100.0;
     let sfr1 = SFr1(s0.get_reserves(&t0, &t1), s0.get_reserves(&t1, &t0), sfr0);
     v.push(Box::new(Swap::new(&m,&t0,&t1,v0)));
-    //
+
     v.push(Box::new(Swap::new(&a,&t0,&t1,20.0)));
-    //for test
-    v.push(Box::new(Swap::new(&m,&t1,&t0,20.6)));
+    
+    //price minimization
+    let v0 = price_mini_transaction(1000.0,1000.0,79.4, 125.9);
+    v.push(Box::new(Swap::new(&m,&t1,&t0,v0)));
     //
 
     println!("Initial: {:.1}", s0);
     for t in v {
         s0 = t.apply(&s0).unwrap();
-        println!("reserve: {:.1}", s0.get_reserves(&t0, &t1));
+        // println!("reserve: {:.1}", s0.get_reserves(&t0, &t1));
         println!("{:.1}", s0);
         println!("\ttotal net_wealth: {:.1}", s0.net_wealth(&price_oracle));
         println!("\tO's net_wealth: {:.1}", s0.net_wealth_user(&o, &price_oracle));
         println!("\tA's net_wealth: {:.1}", s0.net_wealth_user(&a, &price_oracle));
         println!("\tM's net_wealth: {:.1}", s0.net_wealth_user(&m, &price_oracle));
     }
-    // for t in v {
-    //     s0 = t.apply(&s0).unwrap();
-    //     println!("{}",s0);
-    //     println!("\ttotal net_wealth: {}", s0.net_wealth_user(&o,&price_oracle));
-    // }
 }
 
-// fn test(){
-//     let mut s0: State = State::new();
-//     println!("\ttotal net_wealth: {}", s0.net_wealth_user(&o,&price_oracle));
-// }
+fn mev1(){
+    let t0 = Token::Atomic(String::from("t0"));
+    let t1 = Token::Atomic(String::from("t1"));
+    let o: User = User::new("O");
+    let a: User = User::new("A");
+    let m: User = User::new("M");
+
+    let mut s0: State = State::new();
+
+    s0.set_balance(&o, &t0, 100.0);
+    s0.set_balance(&o, &t1, 100.0);
+    s0.set_balance(&a, &t0, 100.0);
+    s0.set_balance(&a, &t1, 100.0);
+    s0.set_balance(&m, &t0, 100.0);
+    s0.set_balance(&m, &t1, 100.0);
+
+
+    let mut v: Vec<Box<dyn Transition>> = Vec::new();
+    v.push(Box::new(Deposit::new(&o,100.0,&t0,100.0,&t1)));
+    
+    //inner layer
+    let sfr0 = SFr0(40.0, 35.0, 100.0,100.0);
+    let mut v0 = 100.0 - sfr0;
+    let sfr1 = SFr1(s0.get_reserves(&t0, &t1), s0.get_reserves(&t1, &t0), sfr0);
+    v.push(Box::new(Swap::new(&m,&t1,&t0,v0)));
+
+    v.push(Box::new(Swap::new(&a,&t0,&t1,40.0)));
+    v.push(Box::new(Swap::new(&m,&t1,&t0,38.3)));
+    v.push(Box::new(Deposit::new(&a,30.0,&t0,40.0,&t1)));
+    
+    //price minimization
+    v0 = price_mini_transaction(1000.0,1000.0,117.0, 155.0);
+    v.push(Box::new(Swap::new(&m,&t0,&t1,v0)));
+    v.push(Box::new(Redeem::new(&a,&t0,&t1,10.0)));
+
+    
+    //price minimization
+    let v0 = price_mini_transaction(1000.0,1000.0,78.0, 129.0);
+    // v.push(Box::new(Swap::new(&m,&t1,&t0,v0)));
+    //
+
+    println!("Initial: {:.1}", s0);
+    for t in v {
+        s0 = t.apply(&s0).unwrap();
+        // println!("reserve: {:.1}", s0.get_reserves(&t0, &t1));
+        println!("{:.1}", s0);
+        println!("\ttotal net_wealth: {:.1}", s0.net_wealth(&price_oracle));
+        println!("\tO's net_wealth: {:.1}", s0.net_wealth_user(&o, &price_oracle));
+        println!("\tA's net_wealth: {:.1}", s0.net_wealth_user(&a, &price_oracle));
+        println!("\tM's net_wealth: {:.1}", s0.net_wealth_user(&m, &price_oracle));
+    }
+}
+
+fn mev3(){
+let t0 = Token::Atomic(String::from("t0"));
+    let t1 = Token::Atomic(String::from("t1"));
+    let a: User = User::new("A");
+    let b =  User::new("B");
+
+    let mut s0 = State::new();
+
+    s0.set_balance(&a, &t0, 100.0);
+    s0.set_balance(&a, &t1, 100.0);
+    s0.set_balance(&b, &t0, 100.0);
+    s0.set_balance(&b, &t1, 100.0);
+
+    let mut v: Vec<Box<dyn Transition>> = Vec::new();
+
+    v.push( Box::new(Deposit::new(&a,100.0, &t0, 100.0, &t1)));
+
+    v.push( Box::new(Swap::new(&b,&t1, &t0, 13.0)));
+    v.push( Box::new(Swap::new(&b,&t0, &t1, 40.0)));
+    v.push( Box::new(Swap::new(&b,&t0, &t1, 30.0)));
+    // v.push( Box::new(Redeem::new(&a,&t0, &t1, 30.0)));
+    // v.push( Box::new(Swap::new(&b,&t0, &t1, 30.0)));
+    // v.push( Box::new(Redeem::new(&a,&t0, &t1, 30.0)));
+
+    println!("Initial: {}", s0);
+    for t in v {
+        s0 = t.apply(&s0).unwrap();
+        println!("{}", s0);
+    }
+}
 
 fn main() {
-    mev0();
-
+    // mev3();
+    // mev0();
+    mev1();
     ///////////////////////////////////AMM
     // let t0 = Token::Atomic(String::from("dai"));
     // let t1 = Token::Atomic(String::from("eth"));
